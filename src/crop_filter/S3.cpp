@@ -16,12 +16,13 @@
 #include <array>
 #include <cmath>
 #include <numbers>
-#include "cuda_functions.h"
-#include "savepng.h"
+#include "crop_filter/cuda/cuda_functions.h"
+#include "util/savepng.h"
+#include "crop_filter/cuda/cuda_polyfit.h"
 
 static cv::cuda::GpuMat spectral_map(const cv::cuda::GpuMat& image, cv::cuda::Stream& stream);
 static cv::cuda::GpuMat spatial_map(const cv::cuda::GpuMat& img, cv::cuda::Stream& stream);
-static void block_amplitude_spectrum_slope(const cv::cuda::GpuMat& block, cv::cuda::GpuMat& spectral_map, size_t block_x, size_t block_y, cv::cuda::Stream& stream);
+static void block_amplitude_spectrum_slope(const cv::cuda::GpuMat& block, float* spectral_map_ptr, cv::cuda::Stream& stream);
 
 #define DEBUG
 
@@ -129,7 +130,8 @@ cv::cuda::GpuMat spectral_map(const cv::cuda::GpuMat& image, cv::cuda::Stream& s
 			sbb.x = x * delta_block + offset;
 			sbb.y = y * delta_block + offset;
 			
-			block_amplitude_spectrum_slope(padded_image(sbb), spectrum, x, y, stream);
+			// block_amplitude_spectrum_slope(padded_image(sbb), spectrum, x, y, stream);
+			block_amplitude_spectrum_slope(padded_image(sbb), cuda_cv_mat_ptr(spectrum, x, y), stream);
 			// block_amplitude_spectrum_slope(padded_image(sbb), spectrum, x, y, block_streams[next_block_stream]);
 			// if (++next_block_stream >= block_streams.size()) {
 			// 	next_block_stream = 0;
@@ -181,26 +183,7 @@ cv::cuda::GpuMat spatial_map(const cv::cuda::GpuMat& image, cv::cuda::Stream& st
 	return final_map;
 }
 
-// least squares approximation algorithm
-static void cvPolyfit(cv::Mat& src_x, cv::Mat& src_y, cv::Mat& dst, int order) {
-	cv::Mat M = cv::Mat::zeros(src_x.rows, order + 1, CV_32FC1);
-	cv::Mat copy;
-	for (int i = 0; i <= order; i++) {
-		copy = src_x.clone();
-		cv::pow(copy, i, copy);
-		cv::Mat M1 = M.col(i);
-		copy.col(0).copyTo(M1);
-	}
-	cv::Mat M_t;
-	cv::transpose(M, M_t);
-	cv::Mat M_t_M = M_t * M;
-	cv::Mat M_t_M_inv;
-	cv::invert(M_t_M, M_t_M_inv);
-	cv::Mat r = M_t_M_inv * M_t * src_y;
-	dst = r.clone();
-}
-
-void block_amplitude_spectrum_slope(const cv::cuda::GpuMat& block, cv::cuda::GpuMat& spectral_map, size_t block_x, size_t block_y, cv::cuda::Stream& stream) {
+void block_amplitude_spectrum_slope(const cv::cuda::GpuMat& block, float* spectral_map_ptr, cv::cuda::Stream& stream) {
 	static constexpr size_t block_size = 32;
 	static cv::cuda::GpuMat hanning_window;
 	static cv::Ptr<cv::cuda::DFT> cuda_dft_instance;
@@ -236,5 +219,11 @@ void block_amplitude_spectrum_slope(const cv::cuda::GpuMat& block, cv::cuda::Gpu
 	cv::cuda::log(frequencies_gpu, frequencies_gpu, stream);
 	cv::cuda::log(magnitude_sums_gpu, magnitude_sums_gpu, stream);
 	
-	cuda_cv_polyfit(frequencies_gpu, magnitude_sums_gpu, spectral_map, block_x, block_y, stream);
+	//cuda_cv_polyfit(frequencies_gpu, magnitude_sums_gpu, spectral_map, block_x, block_y, stream);
+	
+	static cuda_polyfit gpu_solver(frequencies_gpu.rows, 2);
+	gpu_solver.set_stream(stream);
+	
+	gpu_solver.solve(frequencies_gpu, magnitude_sums_gpu, spectral_map_ptr);
+	
 }

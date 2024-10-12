@@ -2,7 +2,7 @@
 
 ### Requirements:
 - CMake
-- CUDA 11.8 (11.8 and 11.5 are confirmed working)
+- CUDA 11.8 (only 11.8 and 11.5 are confirmed working)
 
 ### to compile:
 ```

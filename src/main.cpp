@@ -8,14 +8,14 @@
 #include <algorithm>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include "Timer.h"
+#include "util/timer.h"
 #include <sstream>
 #include <fstream>
-#include "S3.h"
+#include "crop_filter/S3.h"
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/photo.hpp>
-#include "savepng.h"
-#include "Isolator.h"
+#include "util/savepng.h"
+#include "crop_filter/Isolator.h"
 
 namespace fs = std::experimental::filesystem;
 
