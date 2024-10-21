@@ -18,16 +18,15 @@ struct opaque_cuda_state {
 	cudaError_t cuda_status = cudaSuccess;
 };
 
-cuda_polyfit::cuda_polyfit(u32 cols, u32 rows) {
-    ASSERT_MSG(rows == 2, "cuda_polyfit is only capable of solving for first order polynomials!");
-    
+cuda_polyfit::cuda_polyfit(u32 points) {
     internal_state = std::make_unique<opaque_cuda_state>();
     
 	internal_state->cusolver_status = cusolverDnCreate(&internal_state->cusolver_handle);
 	ASSERT_MSG(CUSOLVER_STATUS_SUCCESS == internal_state->cusolver_status, "Error while creating cusolver context!");
 	
-	width = cols;
-	height = rows;
+	m_points = points;
+	width = points;
+	height = 2; // cuda_polyfit is only capable of solving for first order polynomials
 	
 	// create the params and info structure for the 'expert' interface
 	internal_state->cusolver_status = cusolverDnIRSParamsCreate(&internal_state->gels_irs_params);
@@ -108,11 +107,11 @@ void cuda_polyfit::set_stream(cv::cuda::Stream& stream) {
 	internal_state->cusolver_status = cusolverDnSetStream(internal_state->cusolver_handle, internal_state->cuda_stream);
 }
 
-int cuda_polyfit::solve(const cv::cuda::GpuMat& src_x,
-                        const cv::cuda::GpuMat& src_y,
-                        f32* device_output_pointer) {
-	ASSERT_MSG((u32)src_x.rows == width, "src_x.rows must be the same size as cols cuda_polyfit was initialized with!");
-	ASSERT_MSG((u32)src_y.rows == width, "src_y.rows must be the same size as cols cuda_polyfit was initialized with!");
+void cuda_polyfit::solve(const cv::cuda::GpuMat& src_x,
+                    	 const cv::cuda::GpuMat& src_y,
+                         f32* device_output_pointer) {
+	ASSERT_MSG((u32)src_x.rows == width, "src_x.rows must be the same size as points cuda_polyfit was initialized with!");
+	ASSERT_MSG((u32)src_y.rows == width, "src_y.rows must be the same size as points cuda_polyfit was initialized with!");
 	ASSERT_MSG((src_x.cols == 1) && (src_y.cols == 1), "src_x and src_y must be single column Mats!");
     
     // reset device_A
@@ -155,6 +154,4 @@ int cuda_polyfit::solve(const cv::cuda::GpuMat& src_x,
 	// //printf("after gels: number_iterations = %d\n", number_iterations);
 	
     cuda_copy_spectrum_value(device_output_pointer, &device_X[0], internal_state->cuda_stream);
-    
-	return 0;
 }

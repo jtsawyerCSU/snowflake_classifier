@@ -11,11 +11,12 @@
 #include "util/timer.h"
 #include <sstream>
 #include <fstream>
-#include "crop_filter/S3.h"
+#include "crop_filter/blur_detector.h"
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/photo.hpp>
 #include "util/savepng.h"
 #include "crop_filter/Isolator.h"
+#include <memory>
 
 namespace fs = std::experimental::filesystem;
 
@@ -77,6 +78,7 @@ int main(int argc, char** argv) {
 	uint32_t flakesperimage = 0;
 	Isolator snowisolator;
 	std::vector<fs::path> paths;
+	std::unique_ptr<blur_detector> S3;
 	
 	for (const fs::directory_entry& entry : fs::recursive_directory_iterator{input_path}) {
 		fs::path filepath = entry.path();
@@ -107,8 +109,13 @@ int main(int argc, char** argv) {
 		std::cout << "Loading " << filepath << '\n';
 
 		std::cout << "\n\n\n\n";
+		
+		if ((S3 == nullptr) || ((S3->m_image_width != (u32)image_gpu.cols) || (S3->m_image_height != (u32)image_gpu.rows))) {
+			S3 = std::make_unique<blur_detector>(image_gpu.cols, image_gpu.rows);
+		}
+		
 		t.discardTime();
-		float sharpness = S3::s3_max(image_gpu);
+		float sharpness = S3->find_S3_max(image_gpu);
 		t.lap();
 
 		// // the image can be empty sometimes??

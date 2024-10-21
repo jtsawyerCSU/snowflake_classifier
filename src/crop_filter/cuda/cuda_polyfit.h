@@ -10,16 +10,30 @@
 
 struct opaque_cuda_state;
 
+// this object uses cusolver to perfrom a 
+// linear fit on several points
 struct cuda_polyfit {
+public:
     
-	cuda_polyfit(u32 cols, u32 rows);
+	// points is the number of points that will be input into solve()
+	cuda_polyfit(u32 points);
 	~cuda_polyfit();
     
+	// sets the cuda stream the next call to the solve() uses
     void set_stream(cv::cuda::Stream& stream);
     
-	int solve(const cv::cuda::GpuMat& src_x,
-              const cv::cuda::GpuMat& src_y,
-			  f32* device_output_pointer);
+	// performs the linear fit and stores the resulting
+	// slope at the provided device pointer after 
+	// putting it through the sigmoid function
+	// specified in the S3 paper
+	// src_x is the x coords
+	// src_y is the y coords
+	// device_output_pointer is the cuda device pointer
+	void solve(const cv::cuda::GpuMat& src_x,
+               const cv::cuda::GpuMat& src_y,
+			   f32* device_output_pointer);
+
+	u32 m_points = 0;
 
 private:
 	

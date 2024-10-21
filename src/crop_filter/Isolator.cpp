@@ -91,7 +91,6 @@ void Isolator::isolateFlakes(const cv::Mat& input, std::vector<cv::cuda::GpuMat>
 }
 
 void Isolator::getCrop(std::vector<cv::cuda::GpuMat>& flakeImgs, std::vector<cv::Mat>& output) {
-	///*
 	int initialsize = output.size();
 	output.resize(initialsize + flakeImgs.size());
 	
@@ -99,7 +98,6 @@ void Isolator::getCrop(std::vector<cv::cuda::GpuMat>& flakeImgs, std::vector<cv:
 		flakeImgs[i].download(output[initialsize + i], stream);
 	}
 	stream.waitForCompletion();
-	//*/
 	/*
 	std::vector<cv::cuda::GpuMat> temp(flakeImgs.size());
 	int initialsize = output.size();
