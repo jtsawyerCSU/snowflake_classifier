@@ -29,7 +29,7 @@ namespace fs = std::experimental::filesystem;
 static void saveImage(cv::Mat& img, const std::string& folder, const std::string& stem, int num, const std::pair<int, int>& c, float sharpness);
 
 int main(int argc, char** argv) {
-
+	
 	cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 	
 	if (argc != 3) {
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
 	std::string input_folder = argv[1];
 	std::string output_folder = argv[2];
 	//std::string camera_name = argv[3];
-
+	
 	if (cv::cuda::getCudaEnabledDeviceCount() < 1) {
 		std::cout << "No CUDA capable device found! aborting!\n";
 		std::exit(-1);
@@ -61,14 +61,11 @@ int main(int argc, char** argv) {
 	fs::create_directory(debugfolder);
 #endif
 	
-	std::vector<const char*> camera_name_list = {"Cam0_1",
-												 "Cam1_1",
-												 "Cam1_2",
-												 "Cam2_1",
-												 "Cam3_1",
-												 "Cam4_1",
-												 "Cam5_1",
-												 "Cam6_1"};
+	std::vector<const char*> camera_name_list = {"cam_0",
+												 "cam_1",
+												 "cam_2",
+												 "cam_3",
+												 "cam_4"};
 	
 	for (const char* camera_nam : camera_name_list) {
 		std::string camera_name = camera_nam;
@@ -116,25 +113,27 @@ int main(int argc, char** argv) {
 		
 		std::sort(paths.begin(), paths.end());
 		
-		// Timer t;
+		Timer t;
 		// double flakes_per_average = 0;
 		// size_t images_count = 0;
-
+		
 		for (const fs::path& filepath : paths) {
 			image = cv::imread(filepath.string(), cv::IMREAD_GRAYSCALE);
 			
+			t.discardTime();
+			
 			// // one of the SMAS cameras needs this to block out part of the background
 			// cv::threshold(image, image, 120, 255, cv::THRESH_TOZERO); // 2-2023 images
-			cv::threshold(image, image, 50, 255, cv::THRESH_TOZERO); // 1-2022 images
-
+			// cv::threshold(image, image, 50, 255, cv::THRESH_TOZERO); // 1-2022 images
+			
 			// cv::rectangle(image, {0, 1500}, {0, 350}, {0, 255, 255}, cv::FILLED);
 			
 			cv::cuda::GpuMat image_gpu;
 			image_gpu.upload(image);
-			image_gpu.convertTo(image_gpu, CV_32F);
-
-			std::cout << "Loading " << filepath << '\n';
-
+			//image_gpu.convertTo(image_gpu, CV_32F);
+			
+			std::cout << "Loading " << filepath << "\n\n\n\n\n";
+			
 			// std::cout << "\n\n\n\n";
 			
 			// if ((S3 == nullptr) || ((S3->m_image_width != (u32)image_gpu.cols) || (S3->m_image_height != (u32)image_gpu.rows))) {
@@ -144,27 +143,27 @@ int main(int argc, char** argv) {
 			// t.discardTime();
 			// float sharpness = S3->find_S3_max(image_gpu);
 			// t.lap();
-
+			
 			// the image can be empty sometimes??
 			if (image.empty()) {
 				continue;
 			}
 			image.convertTo(image, CV_8U);
-
+			
 			if (snowisolator.needsbackground) {
 				snowisolator.setBackground(image);
 				continue;
 			}
-
+			
 			bool is_cam0_1 = (filepath.string().find("CAM0_1") != std::string::npos);
-
+			
 			snowisolator.isolateFlakes(image, flakes, flakesperimage, coords, is_cam0_1);
-
+			
 			// flakes_per_average *= images_count;
 			// images_count += 1;
 			// flakes_per_average += flakesperimage;
 			// flakes_per_average /= images_count;
-
+			
 			cv::Mat flake;
 			cv::cuda::GpuMat flake_gpu;
 			cv::cuda::Stream stream;
@@ -214,12 +213,14 @@ int main(int argc, char** argv) {
 			flakes.clear();
 			coords.clear();
 			flakesperimage = 0;
+			
+			t.lap();
 		}
 		
 	}
 	
 	// std::cout << "flakes_per_average: " << flakes_per_average << '\n';
-
+	
 	return 0;
 }
 

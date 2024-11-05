@@ -4,6 +4,7 @@
 #define _blur_detector_H
 
 #include "crop_filter/core/defines.h"
+#include "crop_filter/core/logger.h"
 #include "crop_filter/cuda/cuda_polyfit.h"
 #include <opencv2/core/mat.hpp>
 #include <opencv2/cudaarithm.hpp>
@@ -12,12 +13,17 @@
 struct blur_detector {
 public:
 	
-	blur_detector(u32 width, u32 height);
+	// width is the width of the input image
+	// height is the height of the input image
+	// logger is the logger instance used for output
+	// stream is the opencv cuda stream instance used
+	blur_detector(u32 width, u32 height, logger& logger, const cv::cuda::Stream& stream);
 	
 	~blur_detector();
 	
 	void resize(u32 width, u32 height);
 	
+	// find the maximum S3 value for the image 
 	f32 find_S3_max(const cv::cuda::GpuMat& image);
 	
 	u32 m_image_width = 0;
@@ -78,6 +84,8 @@ private:
 	cv::Size m_intermidiate_map1_size;
 	cv::Size m_intermidiate_map2_size;
 	/////////////////////////////////////////
+    
+	logger& m_logger;
 	
 };
 

@@ -37,7 +37,11 @@ static void save(const std::string& name, const cv::Mat& img, float scale = 1.f)
 
 #endif
 
-blur_detector::blur_detector(u32 width, u32 height) {
+blur_detector::blur_detector(u32 width, u32 height, logger& logger, const cv::cuda::Stream& stream) : 
+	m_logger(logger) {
+	// set stream
+	m_stream = stream;
+	
 	// reallocate/resize GpuMats
 	resize(width, height);
 	
@@ -220,6 +224,15 @@ void blur_detector::amplitude_spectrum_slope(const cv::cuda::GpuMat& block, f32*
 	
 	cv::cuda::log(m_magnitudes_gpu, m_magnitudes_gpu, m_stream);
 	
+	u32 n = std::min(m_magnitudes_gpu.rows, m_magnitudes_gpu.cols);
+	u32 radii = (n / 2) - 1;
+	if (((u32)m_magnitude_sums_gpu.rows != radii) || (m_magnitude_sums_gpu.cols != 1)) {
+		m_magnitude_sums_gpu = cv::cuda::GpuMat(radii, 1, CV_32F);
+	}
+	if (((u32)m_frequencies_gpu.rows != radii) || (m_frequencies_gpu.cols != 1)) {
+		m_frequencies_gpu = cv::cuda::GpuMat(radii, 1, CV_32F);
+	}
+	
 	cuda_polar_average(m_magnitudes_gpu, m_magnitude_sums_gpu, m_frequencies_gpu, m_stream);
 	
 	constexpr u32 block_size = 32;
@@ -231,7 +244,7 @@ void blur_detector::amplitude_spectrum_slope(const cv::cuda::GpuMat& block, f32*
 	
 	if ((m_gpu_solver == nullptr) || (m_gpu_solver->m_points != (u32)m_frequencies_gpu.rows)) {
 		// create cuda polynomial solver instance
-		m_gpu_solver = std::make_unique<cuda_polyfit>(m_frequencies_gpu.rows);
+		m_gpu_solver = std::make_unique<cuda_polyfit>(m_frequencies_gpu.rows, m_logger);
 		m_gpu_solver->set_stream(m_stream);
 	}
 	

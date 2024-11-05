@@ -161,9 +161,6 @@ void cuda_polar_average(const cv::cuda::GpuMat& input_magnitudes, cv::cuda::GpuM
 	
 	dim3 blocks(radii);
 	dim3 threads_per_block(RADIAN_SAMPLES);
-	
-	output_magnitude_sums = cv::cuda::GpuMat(radii, 1, CV_32F);
-	output_frequencies = cv::cuda::GpuMat(radii, 1, CV_32F);
 
 	cudaStream_t cuda_stream = cv::cuda::StreamAccessor::getStream(stream);
 	polar_average_impl<<<blocks,threads_per_block,0,cuda_stream>>>(input_magnitudes, n, output_magnitude_sums, output_frequencies);
