@@ -1,6 +1,6 @@
 //#pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion" // opencv uses enum conversion a lot. the warnings are distracting
 
-#include "blur_detector.h"
+#include "crop_filter/blur_detector.h"
 #include <iostream>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -19,6 +19,7 @@
 #include "crop_filter/cuda/cuda_functions.h"
 #include "util/savepng.h"
 #include "crop_filter/cuda/cuda_polyfit.h"
+#include "crop_filter/core/asserts.h"
 
 //#define DEBUG
 
@@ -37,10 +38,9 @@ static void save(const std::string& name, const cv::Mat& img, float scale = 1.f)
 
 #endif
 
-blur_detector::blur_detector(u32 width, u32 height, logger& logger, const cv::cuda::Stream& stream) : 
-	m_logger(logger) {
-	// set stream
-	m_stream = stream;
+blur_detector::blur_detector(u32 width, u32 height, logger& logger, cv::cuda::Stream& stream) : 
+	m_logger(logger),
+	m_stream(stream) {
 	
 	// reallocate/resize GpuMats
 	resize(width, height);
@@ -110,71 +110,101 @@ void blur_detector::resize(u32 width, u32 height) {
 }
 
 /*
-* Input: img is a gray scale image, in float type, range from 0 - 255. 
+* Input: image is a gray scale image, in float type, range from 0 - 255. 
 * You have to convert to gray scale if your image
 * is color. You also have to cast img to float in order to run this code
 * Output:
 * sharpness_estimate: The highest value found in the s3 map
 */
-f32 blur_detector::find_S3_max(const cv::cuda::GpuMat& image) {
-	if ((u32)image.cols != m_image_width) {
-		
-	}
-	if ((u32)image.rows != m_image_height) {
-		
+f32 blur_detector::find_S3_max(const cv::cuda::GpuMat& image, bool enable_spectral, bool enable_spatial) {
+	// check that one option is enabled
+	if (!enable_spectral && !enable_spatial) {
+		// if nothing is enabled, just return maximum sharpness value
+		return 1.f;
 	}
 	
-	cv::cuda::copyMakeBorder(image, m_padded_input_image, 0, m_padding_y, 0, m_padding_x, cv::BORDER_REFLECT, 0, m_stream);
+	// resize image to preallocated size
+	f32 width  = (f32)(m_image_width + m_padding_x - image.cols) / 2.0f;
+	f32 height = (f32)(m_image_height + m_padding_y - image.rows) / 2.0f;
+	cv::cuda::copyMakeBorder(image, 
+							 m_padded_input_image, 
+							 std::floor(height), 
+							 std::ceil(height), 
+							 std::floor(width), 
+							 std::ceil(width), 
+							 cv::BORDER_CONSTANT, 
+							 0, 
+							 m_stream);
 	
-	// blr_map1
-	generate_spectral_map(m_padded_input_image);
-	// blr_map2
-	generate_spatial_map(m_padded_input_image);
+	if (enable_spectral) {
+		generate_spectral_map();
+	}
+	if (enable_spatial) {
+		generate_spatial_map();
+	}
 	
 #ifdef DEBUG
 	cv::Mat debug_img;
-	m_spectral_map.download(debug_img, m_stream);
-	m_stream.waitForCompletion();
-	save("s1", debug_img, 255.f);
-	m_spatial_map.download(debug_img, m_stream);
-	m_stream.waitForCompletion();
-	save("s2", debug_img, 255.f);
+	if (enable_spectral) {
+		m_spectral_map.download(debug_img, m_stream);
+		m_stream.waitForCompletion();
+		save("s1", debug_img, 255.f);
+	}
+	if (enable_spatial) {
+		m_spatial_map.download(debug_img, m_stream);
+		m_stream.waitForCompletion();
+		save("s2", debug_img, 255.f);
+	}
 #endif
 	
-	float alpha = 0.5f;
-	cv::cuda::pow(m_spectral_map, alpha, m_spectral_map, m_stream);
-	cv::cuda::pow(m_spatial_map, 1.f - alpha, m_spatial_map, m_stream);
-	cv::cuda::GpuMat s3;
-	cv::cuda::multiply(m_spectral_map, m_spatial_map, s3, 1, CV_32F, m_stream);
+	if (enable_spectral && enable_spatial) {
+		f32 alpha = 0.5f;
+		cv::cuda::pow(m_spectral_map, alpha, m_spectral_map, m_stream);
+		cv::cuda::pow(m_spatial_map, 1.f - alpha, m_spatial_map, m_stream);
+		cv::cuda::multiply(m_spectral_map, m_spatial_map, m_s3_map, 1, CV_32F, m_stream);
+	}
 	
 #ifdef DEBUG
-	s3.download(debug_img, m_stream);
-	m_stream.waitForCompletion();
-	save("s3", debug_img, 255.f);
+	if (enable_spectral && enable_spatial) {
+		m_s3_map.download(debug_img, m_stream);
+		m_stream.waitForCompletion();
+		save("s3", debug_img, 255.f);
+	}
 	imgnum++;
 #endif
 	
 	m_stream.waitForCompletion();
-
+	
 	// find max value
-	f64 sharpness_estimate;
-	cv::cuda::minMax(s3, nullptr, &sharpness_estimate);
+	f64 sharpness_estimate = 0.f;
+	
+	if (enable_spectral && enable_spatial) {
+		cv::cuda::minMax(m_s3_map, nullptr, &sharpness_estimate);
+	} else {
+		if (enable_spectral) {
+			cv::cuda::minMax(m_spectral_map, nullptr, &sharpness_estimate);
+		}
+		if (enable_spatial) {
+			cv::cuda::minMax(m_spatial_map, nullptr, &sharpness_estimate);
+		}
+	}
+	
 	return sharpness_estimate;
 }
 
 /*
 * Spectral Sharpness, slope of power spectrum
 */
-void blur_detector::generate_spectral_map(const cv::cuda::GpuMat& image) {
+void blur_detector::generate_spectral_map() {
 	constexpr uint32_t block_size = 32;
 	constexpr uint32_t delta_block = block_size / 4; // Distance b/w blocks
 	constexpr uint32_t offset = delta_block / 2;
 	constexpr uint32_t border_width = block_size / 2;
 
-	cv::cuda::copyMakeBorder(image, m_padded_spectral_image, border_width, border_width, border_width, border_width, cv::BORDER_REFLECT, 0, m_stream);
+	cv::cuda::copyMakeBorder(m_padded_input_image, m_padded_spectral_image, border_width, border_width, border_width, border_width, cv::BORDER_REFLECT, 0, m_stream);
 
-	uint32_t num_cols = image.size().width  / delta_block;
-	uint32_t num_rows = image.size().height / delta_block;
+	uint32_t num_cols = m_padded_input_image.size().width  / delta_block;
+	uint32_t num_rows = m_padded_input_image.size().height / delta_block;
 	
 	cuda_luminance_map(m_padded_spectral_image, m_spectral_luminance_map, m_stream);
 	
@@ -195,15 +225,15 @@ void blur_detector::generate_spectral_map(const cv::cuda::GpuMat& image) {
 /*
 * Spatial Sharpness, local total variation
 */
-void blur_detector::generate_spatial_map(const cv::cuda::GpuMat& image) {
+void blur_detector::generate_spatial_map() {
 	constexpr u32 block_size = 8;
 	constexpr u32 offset = block_size / 2;
 	
-	cuda_spatial_map(image, m_partial_spatial_map1, m_stream);
+	cuda_spatial_map(m_padded_input_image, m_partial_spatial_map1, m_stream);
 	
 	cv::cuda::resize(m_partial_spatial_map1, m_intermidiate_map1, {}, 2, 2, cv::INTER_NEAREST, m_stream);
 	
-	cv::cuda::copyMakeBorder(image, m_padded_spatial_image, offset, offset, offset, offset, cv::BORDER_REFLECT, 0, m_stream);
+	cv::cuda::copyMakeBorder(m_padded_input_image, m_padded_spatial_image, offset, offset, offset, offset, cv::BORDER_REFLECT, 0, m_stream);
 	
 	cuda_spatial_map(m_padded_spatial_image, m_partial_spatial_map2, m_stream);
 	

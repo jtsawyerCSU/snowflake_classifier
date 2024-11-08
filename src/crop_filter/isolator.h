@@ -14,7 +14,7 @@ struct isolator {
 	
 	// logger is the logger instance used for output
 	// stream is the opencv cuda stream instance used
-	isolator(logger& logger, const cv::cuda::Stream& stream);
+	isolator(logger& logger, cv::cuda::Stream& stream);
 	
 	// returns the number of snowflakes identified
 	u32 isolate_flakes(const cv::cuda::GpuMat& input);
@@ -27,7 +27,7 @@ private:
 		bounding_box() = default;
 		bounding_box(const bounding_box&) = default;
 		// constructor of bounding_box from a cv::Point
-		bounding_box(cv::Point p);
+		bounding_box(const cv::Point& p);
 		// conversion operator to cv::Rect
 		operator cv::Rect() const;
 		// returns equal if bounding boxes overlap
@@ -38,11 +38,13 @@ private:
 	};
 	
 	// combines points found into blobs to identify likely snowflakes
-	void get_bounded_images(int minimum_dimensions);
+	void get_bounded_images(u32 minimum_dimensions);
+	
+	logger& m_logger;
 	
 	std::vector<cv::Point> m_points;
 	std::vector<bounding_box> m_boxes;
-	cv::cuda::Stream m_stream;
+	cv::cuda::Stream& m_stream;
 	std::array<cv::cuda::GpuMat, 4> m_backgrounds;
 	cv::cuda::GpuMat m_averaged_background;
 	cv::cuda::GpuMat m_foreground;
@@ -50,10 +52,8 @@ private:
 	cv::cuda::GpuMat m_intermediate_image1;
 	cv::cuda::GpuMat m_intermediate_image2;
 	cv::Mat m_cpu_image;
-	uint8_t m_last_background_index = 0;
+	u8 m_last_background_index = 0;
 	bool m_needs_background = true;
-	
-	logger& m_logger;
 	
 public:
 	

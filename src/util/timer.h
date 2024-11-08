@@ -1,14 +1,14 @@
 #pragma once
 
-#ifndef _Timer_H
-#define _Timer_H
+#ifndef _timer_H
+#define _timer_H
 
 #include <chrono>
 #include <cstdint>
 
-struct Timer {
+struct timer {
 
-	Timer();
+	timer();
 	
 	void lap();
 
@@ -16,9 +16,14 @@ struct Timer {
 	
 	void print();
 	
+	// moves the terminal cursor back up
+	// used to overwrite printed stats from the last iteration
+	void reset_position();
+	
 	// all times are in microseconds
 	uint64_t average{}, worst{}, best{std::numeric_limits<uint64_t>::max()}, latest{};
 	std::chrono::time_point<std::chrono::high_resolution_clock> previousTime{std::chrono::high_resolution_clock::now()};
+	int iteration = 0;
 	
 };
 

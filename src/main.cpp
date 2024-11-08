@@ -11,25 +11,25 @@
 #include "util/timer.h"
 #include <sstream>
 #include <fstream>
-#include "crop_filter/blur_detector.h"
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/photo.hpp>
 #include "util/savepng.h"
-#include "crop_filter/Isolator.h"
 #include <memory>
+#include "crop_filter/crop_filter.h"
 
+// shorten filesystem namespace
 namespace fs = std::experimental::filesystem;
 
-//#define DEBUG
-
-#ifdef DEBUG
-	static std::string debugfolder = "./debug_pics";
-#endif
-
-static void saveImage(cv::Mat& img, const std::string& folder, const std::string& stem, int num, const std::pair<int, int>& c, float sharpness);
+static void saveImage(const cv::Mat& img, 
+					  const std::string& folder, 
+					  const std::string& stem, 
+					  int num, 
+					  const std::pair<int, int>& c, 
+					  float sharpness);
 
 int main(int argc, char** argv) {
 	
+	// opencv likes to print a lot of warnings sometimes
 	cv::utils::logging::setLogLevel(cv::utils::logging::LogLevel::LOG_LEVEL_SILENT);
 	
 	if (argc != 3) {
@@ -38,10 +38,8 @@ int main(int argc, char** argv) {
 		std::exit(-1);
 	}
 	
-	// std::string input_folder = "./pics";
 	std::string input_folder = argv[1];
 	std::string output_folder = argv[2];
-	//std::string camera_name = argv[3];
 	
 	if (cv::cuda::getCudaEnabledDeviceCount() < 1) {
 		std::cout << "No CUDA capable device found! aborting!\n";
@@ -51,15 +49,11 @@ int main(int argc, char** argv) {
 	fs::path input_path{input_folder};
 	
 	if (!fs::is_directory(input_path)) {
-		std::cout << input_folder << " folder not found! aborting!\n";
+		std::cout << "input folder " << input_folder << " not found! aborting!\n";
 		std::exit(-1);
 	}
 	
 	fs::create_directory(output_folder);
-	
-#ifdef DEBUG
-	fs::create_directory(debugfolder);
-#endif
 	
 	std::vector<const char*> camera_name_list = {"cam_0",
 												 "cam_1",
@@ -67,9 +61,7 @@ int main(int argc, char** argv) {
 												 "cam_3",
 												 "cam_4"};
 	
-	for (const char* camera_nam : camera_name_list) {
-		std::string camera_name = camera_nam;
-		
+	for (std::string camera_name : camera_name_list) {
 		
 		std::string usable_folder   = output_folder + "/usable_images";
 		std::string unusable_folder = output_folder + "/unusable_images";
@@ -89,13 +81,9 @@ int main(int argc, char** argv) {
 		fs::create_directory(blurry_folder);
 		fs::create_directory(usable_folder);
 		
-		cv::Mat image;
-		std::vector<std::pair<int, int>> coords;
-		std::vector<cv::cuda::GpuMat> flakes;
-		uint32_t flakesperimage = 0;
-		Isolator snowisolator;
 		std::vector<fs::path> paths;
-		std::unique_ptr<blur_detector> S3;
+		cv::Mat image;
+		std::unique_ptr<crop_filter> crop_filter_instance = nullptr;
 		
 		for (const fs::directory_entry& entry : fs::recursive_directory_iterator{input_path}) {
 			fs::path filepath = entry.path();
@@ -111,120 +99,95 @@ int main(int argc, char** argv) {
 			paths.emplace_back(filepath);
 		}
 		
+		// sort input images so background subtraction works
 		std::sort(paths.begin(), paths.end());
 		
-		Timer t;
-		// double flakes_per_average = 0;
-		// size_t images_count = 0;
+		// timer to test how long things take
+		timer t;
 		
 		for (const fs::path& filepath : paths) {
 			image = cv::imread(filepath.string(), cv::IMREAD_GRAYSCALE);
 			
-			t.discardTime();
-			
-			// // one of the SMAS cameras needs this to block out part of the background
+			// crude SMAS noise cutoff
 			// cv::threshold(image, image, 120, 255, cv::THRESH_TOZERO); // 2-2023 images
 			// cv::threshold(image, image, 50, 255, cv::THRESH_TOZERO); // 1-2022 images
 			
+			// some of the SMAS cameras needs these to block out part of the background
+			
+			// CAM0_1
+			// cv::rectangle(foreground, {0, 700}, {450, 1450}, {0, 255, 255}, cv::FILLED);
+			// cv::rectangle(foreground, {300, 500}, {400, 750}, {0, 0, 0}, cv::FILLED);
+			
+			// CAM1_1
 			// cv::rectangle(image, {0, 1500}, {0, 350}, {0, 255, 255}, cv::FILLED);
 			
 			cv::cuda::GpuMat image_gpu;
 			image_gpu.upload(image);
-			//image_gpu.convertTo(image_gpu, CV_32F);
 			
-			std::cout << "Loading " << filepath << "\n\n\n\n\n";
-			
-			// std::cout << "\n\n\n\n";
-			
-			// if ((S3 == nullptr) || ((S3->m_image_width != (u32)image_gpu.cols) || (S3->m_image_height != (u32)image_gpu.rows))) {
-			// 	S3 = std::make_unique<blur_detector>(image_gpu.cols, image_gpu.rows);
-			// }
-			
-			// t.discardTime();
-			// float sharpness = S3->find_S3_max(image_gpu);
-			// t.lap();
+			std::cout << "Loading " << filepath << '\n';
 			
 			// the image can be empty sometimes??
 			if (image.empty()) {
 				continue;
 			}
-			image.convertTo(image, CV_8U);
 			
-			if (snowisolator.needsbackground) {
-				snowisolator.setBackground(image);
-				continue;
+			// create crop_filter instance if it doesn't exist yet
+			if (crop_filter_instance == nullptr) {
+				crop_filter_instance = std::make_unique<crop_filter>(image_gpu.cols, image_gpu.rows);
+				
+				// disable spectreal sharpness calculations
+				crop_filter_instance->enable_spectral(false);
+				// without spectral the threshold needs to be a bit lower
+				crop_filter_instance->set_blur_threshold(0.13f);
 			}
 			
-			bool is_cam0_1 = (filepath.string().find("CAM0_1") != std::string::npos);
+			// reset timer
+			t.discardTime();
 			
-			snowisolator.isolateFlakes(image, flakes, flakesperimage, coords, is_cam0_1);
+			unsigned int number_sharp_flakes = crop_filter_instance->crop(image_gpu);
 			
-			// flakes_per_average *= images_count;
-			// images_count += 1;
-			// flakes_per_average += flakesperimage;
-			// flakes_per_average /= images_count;
-			
-			cv::Mat flake;
-			cv::cuda::GpuMat flake_gpu;
-			cv::cuda::Stream stream;
-			for (uint32_t i = 0; i < flakesperimage; ++i) {
-				if ((flakes.size() > i) && (coords.size() > i)) {
-					if ((flakes[i].cols > 300) || (flakes[i].rows > 300)) {
-						flakes[i].download(flake, stream);
-						stream.waitForCompletion();
-						saveImage(flake, oversize_folder, filepath.stem(), i, coords[i], 0);
-						continue;
-					}
-					
-					float width  = (float)(300 - flakes[i].cols) / 2.0f;
-					float height = (float)(300 - flakes[i].rows) / 2.0f;
-					cv::cuda::copyMakeBorder(flakes[i],
-											flake_gpu,
-											std::floor(height),
-											std::ceil(height),
-											std::floor(width),
-											std::ceil(width),
-											cv::BORDER_CONSTANT,
-											0,
-											stream);
-					
-					if ((S3 == nullptr) || ((S3->m_image_width != (u32)flake_gpu.cols) || (S3->m_image_height != (u32)flake_gpu.rows))) {
-						S3 = std::make_unique<blur_detector>(flake_gpu.cols, flake_gpu.rows);
-					}
-					if ((S3->m_image_width != (u32)flake_gpu.cols) || (S3->m_image_height != (u32)flake_gpu.rows)) {
-						S3->resize(flake_gpu.cols, flake_gpu.rows);
-					}
-					
-					flake_gpu.convertTo(flake_gpu, CV_32F);
-					float sharpness = S3->find_S3_max(flake_gpu);
-					
-					flake_gpu.download(flake, stream);
-					stream.waitForCompletion();
-					
-					// original value was 0.575
-					if (sharpness > 0.2) {
-						saveImage(flake, usable_folder, filepath.stem(), i, coords[i], sharpness);
-					} else {
-						saveImage(flake, blurry_folder, filepath.stem(), i, coords[i], sharpness);
-					}
-				}
-			}
-			
-			flakes.clear();
-			coords.clear();
-			flakesperimage = 0;
-			
+			// print time for this iteration
 			t.lap();
+			
+			// skip saving anything if there are no sharp flakes
+			// if (number_sharp_flakes == 0) {
+			// 	continue;
+			// }
+			
+			uint32_t snowflake_number = 0;
+			
+			// save sharp flake images
+			const std::vector<cv::Mat>& sharp_flakes = crop_filter_instance->get_cropped_images();
+			const std::vector<std::pair<u32, u32>>& sharp_coords = crop_filter_instance->get_cropped_coords();
+			const std::vector<f32>& sharp_sharpness = crop_filter_instance->get_cropped_sharpness();
+			for (uint32_t i = 0; i < sharp_flakes.size(); ++i) {
+				saveImage(sharp_flakes[i], usable_folder, filepath.stem(), snowflake_number + i, sharp_coords[i], sharp_sharpness[i]);
+			}
+			snowflake_number += sharp_flakes.size();
+			
+			// save blurry flake images
+			const std::vector<cv::Mat>& blurry_flakes = crop_filter_instance->get_blurry_images();
+			const std::vector<std::pair<u32, u32>>& blurry_coords = crop_filter_instance->get_blurry_coords();
+			const std::vector<f32>& blurry_sharpness = crop_filter_instance->get_blurry_sharpness();
+			for (uint32_t i = 0; i < blurry_flakes.size(); ++i) {
+				saveImage(blurry_flakes[i], blurry_folder, filepath.stem(), snowflake_number + i, blurry_coords[i], blurry_sharpness[i]);
+			}
+			snowflake_number += blurry_flakes.size();
+			
+			// save oversize flake images
+			const std::vector<cv::Mat>& oversize_flakes = crop_filter_instance->get_oversize_images();
+			const std::vector<std::pair<u32, u32>>& oversize_coords = crop_filter_instance->get_oversize_coords();
+			for (uint32_t i = 0; i < oversize_flakes.size(); ++i) {
+				saveImage(oversize_flakes[i], oversize_folder, filepath.stem(), snowflake_number + i, oversize_coords[i], 0);
+			}
 		}
 		
 	}
 	
-	// std::cout << "flakes_per_average: " << flakes_per_average << '\n';
-	
 	return 0;
 }
 
-static void saveImage(cv::Mat& img, const std::string& folder, const std::string& stem, int num, const std::pair<int, int>& c, float sharpness) {
+static void saveImage(const cv::Mat& img, const std::string& folder, const std::string& stem, int num, const std::pair<int, int>& c, float sharpness) {
 	int cY = c.first;
 	int cX = c.second;
 	std::string outPath = folder + '/' + stem + 'X' + std::to_string(cX) + 'Y' + std::to_string(cY) + "_S" + std::to_string(sharpness) + "_" + "cropped" + std::to_string(num) + ".png";

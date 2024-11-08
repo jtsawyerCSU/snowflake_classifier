@@ -17,29 +17,34 @@ public:
 	// height is the height of the input image
 	// logger is the logger instance used for output
 	// stream is the opencv cuda stream instance used
-	blur_detector(u32 width, u32 height, logger& logger, const cv::cuda::Stream& stream);
+	blur_detector(u32 width, u32 height, logger& logger, cv::cuda::Stream& stream);
 	
 	~blur_detector();
 	
 	void resize(u32 width, u32 height);
 	
 	// find the maximum S3 value for the image 
-	f32 find_S3_max(const cv::cuda::GpuMat& image);
+	// enable_spectral determines if spectral calculations are preformed
+	// enable_spatial determines if spatial calculations are preformed
+	f32 find_S3_max(const cv::cuda::GpuMat& image, bool enable_spectral, bool enable_spatial);
 	
 	u32 m_image_width = 0;
 	u32 m_image_height = 0;
 	
 private:
 	
-	void generate_spectral_map(const cv::cuda::GpuMat& image);
+	void generate_spectral_map();
 	
-	void generate_spatial_map(const cv::cuda::GpuMat& img);
+	void generate_spatial_map();
 	
 	void amplitude_spectrum_slope(const cv::cuda::GpuMat& block, f32* spectral_map_ptr);
+    
+	logger& m_logger;
 	
-	cv::cuda::Stream m_stream;
+	cv::cuda::Stream& m_stream;
 	cv::cuda::GpuMat m_spectral_map;
 	cv::cuda::GpuMat m_spatial_map;
+	cv::cuda::GpuMat m_s3_map;
 	cv::cuda::GpuMat m_padded_input_image;
 	cv::Size m_map_size;
 	u32 m_padding_x = 0;
@@ -84,8 +89,6 @@ private:
 	cv::Size m_intermidiate_map1_size;
 	cv::Size m_intermidiate_map2_size;
 	/////////////////////////////////////////
-    
-	logger& m_logger;
 	
 };
 

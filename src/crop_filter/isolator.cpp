@@ -1,7 +1,6 @@
 //#pragma GCC diagnostic ignored "-Wdeprecated-enum-enum-conversion" // opencv uses enum conversion a lot. the warnings are distracting
 
-#include "isolator.h"
-#include <iom_stream>
+#include "crop_filter/isolator.h"
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -15,16 +14,14 @@
 #include <opencv2/cudawarping.hpp>
 #include "util/savepng.h"
 
-isolator::isolator(logger& logger, const cv::cuda::Stream& stream) : 
-	m_logger(logger) {
-	// set stream
-	m_stream = stream;
-}
+isolator::isolator(logger& logger, cv::cuda::Stream& stream) : 
+	m_logger(logger),
+	m_stream(stream) {}
 
-constexpr double scalar = 8;
-constexpr double inverse_scalar = 1 / scalar;
-constexpr int point_expand_factor = 5;
-constexpr int box_expand_factor = 20;
+constexpr f64 scalar = 8;
+constexpr f64 inverse_scalar = 1 / scalar;
+constexpr s32 point_expand_factor = 5;
+constexpr s32 box_expand_factor = 20;
 
 u32 isolator::isolate_flakes(const cv::cuda::GpuMat& input) {
 	
@@ -66,7 +63,10 @@ u32 isolator::isolate_flakes(const cv::cuda::GpuMat& input) {
 	// wait for stream to complete
 	m_stream.waitForCompletion();
 	
-	// bitwise OR the foreground image with itself using m_intermediate_image2 as a mask
+	// threshold the background subtracted image to suppress border noise
+	cv::cuda::threshold(m_intermediate_image2, m_intermediate_image2, 5, 255, cv::THRESH_BINARY, m_stream);
+	
+	// bitwise OR the foreground image with itself using the background subtracted image as a mask
 	// the bitwise OR does nothing, this just masks out the background 
 	cv::cuda::bitwise_or(m_foreground, m_foreground, m_intermediate_image1, m_intermediate_image2, m_stream);
 	
@@ -95,24 +95,30 @@ u32 isolator::isolate_flakes(const cv::cuda::GpuMat& input) {
 	
 	// combine points found into blobs to identify likely snowflakes
 	get_bounded_images(15);
-	// getBoundedImgs(m_intermediate_image1, output, 15, outputcoords);
 	
-	return output.size();
+	return m_output_flakes.size();
 }
 
-void isolator::get_bounded_images(cv::cuda::GpuMat& image, int minimum_dimensions) {
+void isolator::get_bounded_images(u32 minimum_dimensions) {
+	// clear output from last iteration
+	m_output_flakes.clear();
+	m_output_coords.clear();
+	
 	// if no points were found, leave
 	if (m_points.empty()) {
 		return;
 	}
 	
 	// create bounding boxes from points
-	m_boxes.insert(0, m_points.begin(), m_points.end());
+	m_boxes.reserve(m_points.size());
+	for (const cv::Point& point : m_points) {
+		m_boxes.emplace_back(point);
+	}
 	m_points.clear();
 	
 	// combine overlapping boxes
 loop:
-	for (size_t i = 0; i < (m_boxes.size() - 1); ++i) {
+	for (s32 i = 0; i < ((s32)m_boxes.size() - 1); ++i) {
 		bounding_box& combinedBox = m_boxes[i];
 		std::vector<bounding_box>::iterator it = std::remove_if(m_boxes.begin() + i + 1, m_boxes.end(), 
 			[&](const bounding_box& box) {
@@ -144,7 +150,7 @@ loop:
 		bounding_rectangle.height *= scalar;
 		
 		// if either dimension is less than minimum_dimensions the skip this section
-		if ((bounding_rectangle.width < minimum_dimensions) || (bounding_rectangle.height < minimum_dimensions)) {
+		if (((u32)bounding_rectangle.width < minimum_dimensions) || ((u32)bounding_rectangle.height < minimum_dimensions)) {
 			continue;
 		}
 		
@@ -184,11 +190,11 @@ loop:
 // bounding_box member functions
 
 // bounding_box: constructor of bounding_box from a cv::Point
-isolator::bounding_box::bounding_box(cv::Point p) : 
-	minX{p.x - point_expand_factor}, 
-	minY{p.y - point_expand_factor}, 
-	maxX{p.x + point_expand_factor}, 
-	maxY{p.y + point_expand_factor} {}
+isolator::bounding_box::bounding_box(const cv::Point& p) : 
+	minX{(u32)p.x - point_expand_factor}, 
+	minY{(u32)p.y - point_expand_factor}, 
+	maxX{(u32)p.x + point_expand_factor}, 
+	maxY{(u32)p.y + point_expand_factor} {}
 
 // bounding_box: conversion operator to cv::Rect
 isolator::bounding_box::operator cv::Rect() const {
