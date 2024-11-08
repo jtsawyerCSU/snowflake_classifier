@@ -31,16 +31,19 @@ u32 isolator::isolate_flakes(const cv::cuda::GpuMat& input) {
 		input.convertTo(m_backgrounds[m_last_background_index], CV_8U, m_stream);
 		
 		// divide stored background by 4
-		cv::cuda::rshift(m_backgrounds[m_last_background_index], cv::Scalar(2), m_backgrounds[m_last_background_index]);
+		cv::cuda::rshift(m_backgrounds[m_last_background_index], cv::Scalar(2), m_backgrounds[m_last_background_index], m_stream);
 		
 		// if 4 images have been collected, add them together
 		if (++m_last_background_index >= 4) {
 			--m_last_background_index;
-			cv::cuda::add(m_backgrounds[0], m_backgrounds[1],    m_averaged_background);
-			cv::cuda::add(m_backgrounds[2], m_averaged_background, m_averaged_background);
-			cv::cuda::add(m_backgrounds[3], m_averaged_background, m_averaged_background);
+			cv::cuda::add(m_backgrounds[0], m_backgrounds[1],      m_averaged_background, {}, {}, m_stream);
+			cv::cuda::add(m_backgrounds[2], m_averaged_background, m_averaged_background, {}, {}, m_stream);
+			cv::cuda::add(m_backgrounds[3], m_averaged_background, m_averaged_background, {}, {}, m_stream);
 			m_needs_background = false;
 		}
+		
+		// wait for stream to complete
+		m_stream.waitForCompletion();
 		
 		return 0;
 	}
@@ -60,9 +63,6 @@ u32 isolator::isolate_flakes(const cv::cuda::GpuMat& input) {
 	// download the thresholded image to the cpu
 	m_intermediate_image.download(m_cpu_image, m_stream);
 	
-	// wait for stream to complete
-	m_stream.waitForCompletion();
-	
 	// threshold the background subtracted image to suppress border noise
 	cv::cuda::threshold(m_intermediate_image2, m_intermediate_image2, 5, 255, cv::THRESH_BINARY, m_stream);
 	
@@ -70,31 +70,30 @@ u32 isolator::isolate_flakes(const cv::cuda::GpuMat& input) {
 	// the bitwise OR does nothing, this just masks out the background 
 	cv::cuda::bitwise_or(m_foreground, m_foreground, m_intermediate_image1, m_intermediate_image2, m_stream);
 	
+	// wait for stream to complete
+	m_stream.waitForCompletion();
+	
 	// add new image to background
 	if (++m_last_background_index >= 4) {
 		m_last_background_index = 0;
 	}
-	
 	// subtract the oldest background from the averaged background
 	cv::cuda::subtract(m_averaged_background, m_backgrounds[m_last_background_index], m_averaged_background, {}, {}, m_stream);
-	
 	// store the current foreground into the backgrounds array
 	std::swap(m_backgrounds[m_last_background_index], m_foreground);
-	
 	// divide the new background by 4
 	cv::cuda::rshift(m_backgrounds[m_last_background_index], cv::Scalar(2), m_backgrounds[m_last_background_index], m_stream);
-	
 	// add the new background to the average
 	cv::cuda::add(m_backgrounds[m_last_background_index], m_averaged_background, m_averaged_background, {}, {}, m_stream);
 	
 	// find non-masked pixels where snowflakes might be
 	cv::findNonZero(m_cpu_image, m_points);
 	
-	// wait for m_stream to complete
-	m_stream.waitForCompletion();
-	
 	// combine points found into blobs to identify likely snowflakes
 	get_bounded_images(15);
+	
+	// wait for m_stream to complete
+	m_stream.waitForCompletion();
 	
 	return m_output_flakes.size();
 }
@@ -139,7 +138,7 @@ loop:
 	m_output_flakes.resize(m_boxes.size());
 	m_output_coords.resize(m_boxes.size());
 	
-	int output_index = 0;
+	u32 output_index = 0;
 	for (const bounding_box& combinedBox : m_boxes) {
 		cv::Rect bounding_rectangle = combinedBox;
 		
