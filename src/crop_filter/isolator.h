@@ -34,7 +34,7 @@ private:
 		bool operator==(const bounding_box& other) const;
 		// combines bounding boxes using their widest respective bounds
 		void combine(const bounding_box& other);
-		u32 minX{}, minY{}, maxX{}, maxY{};
+		s32 minX{}, minY{}, maxX{}, maxY{};
 	};
 	
 	// combines points found into blobs to identify likely snowflakes

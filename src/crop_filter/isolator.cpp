@@ -190,10 +190,10 @@ loop:
 
 // bounding_box: constructor of bounding_box from a cv::Point
 isolator::bounding_box::bounding_box(const cv::Point& p) : 
-	minX{(u32)p.x - point_expand_factor}, 
-	minY{(u32)p.y - point_expand_factor}, 
-	maxX{(u32)p.x + point_expand_factor}, 
-	maxY{(u32)p.y + point_expand_factor} {}
+	minX{p.x - point_expand_factor}, 
+	minY{p.y - point_expand_factor}, 
+	maxX{p.x + point_expand_factor}, 
+	maxY{p.y + point_expand_factor} {}
 
 // bounding_box: conversion operator to cv::Rect
 isolator::bounding_box::operator cv::Rect() const {

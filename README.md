@@ -50,3 +50,6 @@ if needed here is a command to completely purge all things nvidia:
 ```
 sudo apt-get --purge remove "*cublas*" "*cufft*" "*curand*" "*cusolver*" "*cusparse*" "*npp*" "*nvjpeg*" "cuda*" "nsight*"
 ```
+
+if at some point someone needs to modify the CUDA code, here is a very useful set of videos that explain how to work with CUDA:
+- https://youtube.com/playlist?list=PLKK11Ligqititws0ZOoGk3SW-TZCar4dK&si=2sqY5Yjp8s8FCQjG

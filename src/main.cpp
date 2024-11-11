@@ -55,6 +55,7 @@ int main(int argc, char** argv) {
 	
 	fs::create_directory(output_folder);
 	
+	// for the SMAS, replace cam_x with CAMx_1
 	std::vector<const char*> camera_name_list = {"cam_0",
 												 "cam_1",
 												 "cam_2",

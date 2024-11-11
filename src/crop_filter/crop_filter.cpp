@@ -60,14 +60,14 @@ u32 crop_filter::crop(const cv::cuda::GpuMat& image) {
 	"crop_filter::crop(): Cannot crop images that are not the same size as what crop_filter was initialized with!");
 	
 	// clear previous images
-	m_cropped_images = std::vector<cv::Mat>();
-	m_cropped_coords = std::vector<std::pair<u32, u32>>();
-	m_cropped_sharpness = std::vector<f32>();
-	m_blurry_images = std::vector<cv::Mat>();
-	m_blurry_coords = std::vector<std::pair<u32, u32>>();
-	m_blurry_sharpness = std::vector<f32>();
-	m_oversize_images = std::vector<cv::Mat>();
-	m_oversize_coords = std::vector<std::pair<u32, u32>>();
+	m_cropped_images.clear();
+	m_cropped_coords.clear();
+	m_cropped_sharpness.clear();
+	m_blurry_images.clear();
+	m_blurry_coords.clear();
+	m_blurry_sharpness.clear();
+	m_oversize_images.clear();
+	m_oversize_coords.clear();
 	
 	// crop flakes
 	u32 number_flakes = m_snow_isolator->isolate_flakes(image);
@@ -84,15 +84,15 @@ u32 crop_filter::crop(const cv::cuda::GpuMat& image) {
 		// bounds check
 		if ((flakes.size() > i) && (coords.size() > i)) {
 			// oversize images
-			if (m_oversize_enabled) {
-				if ((flakes[i].cols > 300) || (flakes[i].rows > 300)) {
+			if ((flakes[i].cols > 300) || (flakes[i].rows > 300)) {
+				if (m_oversize_enabled) {
 					flakes[i].download(m_current_cpu_image, m_stream);
 					m_stream.waitForCompletion();
 					
 					m_oversize_images.emplace_back(m_current_cpu_image.clone());
 					m_oversize_coords.emplace_back(coords[i]);
-					continue;
 				}
+				continue;
 			}
 			
 			// image must be 32-bit float for S3
